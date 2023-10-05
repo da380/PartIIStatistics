@@ -1,9 +1,6 @@
-# PartIIStatistics
+# PartII Statistics For Earth Science
 
-Topics to cover:
+This repository contains Jupyter notebooks
 
-1. Averaging data
-2. Propagation of errors
-3. Testing a model
-4. Parameter estimation
+
    
