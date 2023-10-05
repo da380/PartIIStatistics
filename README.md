@@ -27,7 +27,7 @@ If you need to install any of these packages, it is probably easiest to search o
 
 ## Q&A session
 
-There will be a Q&A session on the material held onFriday 17th November at 12-1pm in the Galson Lab. Here you can ask any questions about the material. 
+There will be a Q&A session on the material held on Friday 17th November at 12-1pm in the Galson Lab. Here you can ask any questions about the material. 
 
 ## Issues or feedback
 
