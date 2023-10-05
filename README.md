@@ -17,7 +17,7 @@ while slight variants might be needed using different operating systems.
 
 ## Dependencies
 
-Only standard python packages are used, and you will likely have installed already. But for reference, you will need:
+Only standard python packages are used, and you will likely have them installed already. But for reference, you will need:
 
 - `matplotlib`
 - `numpy`
