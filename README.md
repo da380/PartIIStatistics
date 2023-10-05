@@ -17,11 +17,13 @@ while slight variants might be needed using different operating systems.
 
 ## Dependencies
 
-Only standard python packages are used that you will likely have installed. But for reference, you will need:
+Only standard python packages are used, and you will likely have installed already. But for reference, you will need:
 
 - `matplotlib`
 - `numpy`
-- `scipy` 
+- `scipy`
+
+If you need to install any of these packages, it is probably easiest to search online for instructions. 
 
 ## Q&A session
 
