@@ -23,7 +23,9 @@ Only standard python packages are used, and you will likely have installed alrea
 - `numpy`
 - `scipy`
 
-If you need to install any of these packages, it is probably easiest to search online for instructions. 
+If you use pip, then all requirements can be installed using
+
+`pip install -r requirements.txt`
 
 ## Q&A session
 
