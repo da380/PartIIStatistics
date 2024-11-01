@@ -29,7 +29,7 @@ If you use pip, then all requirements can be installed using
 
 ## Q&A session
 
-There will be a Q&A session on the material held on Friday 22nd November at 12-1pm in the Galson Lab. Here you can ask any questions about the material. 
+There will be a Q&A session on the material held on Friday 22nd November at 12-1pm. Here you can ask any questions about the material. 
 
 ## Issues or feedback
 
