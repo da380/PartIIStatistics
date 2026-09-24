@@ -7,11 +7,13 @@ header(F, "7. Bayesian inference",
      "Understand prior, likelihood and posterior, and compute posteriors for simple problems exactly and on a grid.",
      "Interpret a credible interval, and see how it differs from a confidence interval.",
      "Understand how the prior matters when data are scarce and fades when data are plentiful.",
-     "Run a simple Markov chain Monte Carlo sampler, the tool that makes Bayesian methods practical."],
+     "Run a simple Markov chain Monte Carlo sampler, the tool that makes Bayesian methods practical.",
+     "Compare hypotheses with the evidence ratio (Bayes factor), and see how it penalises unnecessary parameters."],
     ["`stats.beta`, `stats.binomtest(...).proportion_ci`",
      "`stats.norm` for the conjugate normal model",
      "grid evaluation with `np.meshgrid`, and marginalisation by summing",
-     "a hand-written Metropolis sampler using `rng.normal` and `rng.uniform`"]),
+     "a hand-written Metropolis sampler using `rng.normal` and `rng.uniform`",
+     "`stats.binom`, `stats.binomtest`, `stats.multivariate_normal(...).logpdf` for evidence calculations"]),
 
 SETUP,
 
@@ -278,6 +280,111 @@ Some practical points. The step size matters: too small and the chain crawls, to
 """),
 
 md(r"""
+## Comparing hypotheses: the evidence and Bayes factors
+
+So far we have estimated parameters within a single model. Often the question is which of two *models* is better supported by the data: is the geyser's short-eruption fraction exactly one third, or something else? Is a straight line enough, or is there curvature? The frequentist answer is a hypothesis test with a p-value. The Bayesian answer applies Bayes' theorem to the hypotheses themselves.
+
+For hypotheses $H_0$ and $H_1$,
+
+$$
+\frac{P(H_1 \mid D)}{P(H_0 \mid D)} = \underbrace{\frac{p(D \mid H_1)}{p(D \mid H_0)}}_{B_{10},\ \text{the Bayes factor}} \times \frac{P(H_1)}{P(H_0)} ,
+$$
+
+so the posterior odds are the prior odds multiplied by the **Bayes factor**, the ratio of the probabilities of the data under the two hypotheses. Those probabilities are the **evidence** (or marginal likelihood) of each model,
+
+$$
+p(D \mid H) = \int p(D \mid \theta, H)\, p(\theta \mid H)\, \mathrm{d}\theta ,
+$$
+
+the likelihood *averaged over the prior* for the model's parameters. This is the normalising denominator that we discarded when estimating parameters; for comparing models it is the whole point. A rough scale, due to Jeffreys: a Bayes factor of 3 is barely worth mentioning, 10 is substantial, 30 strong, and 100 decisive, with the reciprocals meaning the same in the other direction.
+
+The evidence has a property that makes it very different from a maximised likelihood. A model with extra free parameters can always fit at least as well at its *best* parameters, but its prior probability is spread over a larger volume of parameter space, most of which fits badly. Averaging over the prior therefore penalises the extra freedom unless the data really need it: an automatic **Occam's razor**. This is why Bayes factors can favour the simpler model, something a likelihood ratio can never do.
+
+### Example: is the short-eruption fraction exactly one third?
+
+Let $H_0$ be "$\theta = 1/3$", with no free parameter, and $H_1$ be "$\theta$ is unknown", with a uniform prior. For $k$ short eruptions out of $n$, the evidence for $H_0$ is just the binomial probability of the data at $\theta = 1/3$. For $H_1$ it is the binomial probability integrated over the uniform prior, which is exactly $1/(n+1)$: the average over $\theta$ of $\binom{n}{k}\theta^k(1-\theta)^{n-k}$ does not depend on $k$ at all. So
+
+$$
+B_{01} = \frac{p(D \mid H_0)}{p(D \mid H_1)} = (n+1)\,\binom{n}{k}\left(\tfrac{1}{3}\right)^{k}\left(\tfrac{2}{3}\right)^{n-k} .
+$$
+
+We compute it as the data accumulate, alongside the frequentist p-value for the same null.
+"""),
+
+code(r"""
+def bayes_factor_01(k, n, theta0=1/3):
+    return (n + 1) * stats.binom(n, theta0).pmf(k)          # evidence for H0 / evidence for H1 (uniform prior)
+
+ns = np.arange(10, len(short) + 1, 2)
+B01 = np.array([bayes_factor_01(short[:n].sum(), n) for n in ns])
+pvals = np.array([stats.binomtest(int(short[:n].sum()), n, 1/3).pvalue for n in ns])
+
+fig, ax = plt.subplots(1, 2, figsize=(11, 4))
+ax[0].semilogy(ns, B01); ax[0].axhline(1, color="k", lw=1)
+ax[0].set(xlabel="number of eruptions n", ylabel="Bayes factor B₀₁ (for θ = 1/3)")
+ax[1].plot(ns, pvals); ax[1].axhline(0.05, color="k", lw=1, ls="--")
+ax[1].set(xlabel="number of eruptions n", ylabel="p-value for θ = 1/3", ylim=(0, 1))
+plt.show()
+
+n, k = len(short), short.sum()
+print(f"all {n} eruptions, {k} short (fraction {k/n:.3f}):  B01 = {bayes_factor_01(k, n):.2f},  p-value = {stats.binomtest(int(k), n, 1/3).pvalue:.3f}")
+"""),
+
+md(r"""
+With all the data the Bayes factor is about 10 *in favour* of the point hypothesis $\theta = 1/3$: the observed fraction of 0.357 is close enough to one third that the alternative, which had to spread its bets over the whole interval, is penalised for its vagueness. The p-value, at about 0.4, says only that the data are not surprising under $H_0$; it can never accumulate support *for* a null hypothesis, however much data arrives (Exercise 4 makes this precise). The two are answering different questions, and the Bayesian one, "which hypothesis is better supported?", is often the one actually being asked.
+
+The answer does depend on the prior for $\theta$ under $H_1$. Had we used a prior concentrated near $1/3$, the two hypotheses would have been nearly indistinguishable and $B_{01}$ close to 1; a prior spread over $[0, 1]$ is the most demanding alternative. This sensitivity to the prior is real and should be reported, but it is not arbitrary: the prior *is* the alternative hypothesis, and saying "some other value of $\theta$" without saying which values are plausible is not a hypothesis at all.
+
+### Example: line or quadratic?
+
+Return to the straight-line data. Is there evidence for curvature? Compare $M_1$: $y = ax + b$ with $M_2$: $y = ax + b + cx^2$. Both are linear in their parameters with normal errors, and with normal priors on the parameters the evidence has a closed form: the data vector $\mathbf{y}$ is itself normally distributed, with mean $\mathbf{G}\boldsymbol{\mu}_0$ and covariance $\mathbf{G}\mathbf{C}_0\mathbf{G}^T + \sigma^2\mathbf{I}$, where $\mathbf{G}$ is the design matrix and $\boldsymbol{\mu}_0$, $\mathbf{C}_0$ the prior mean and covariance. So the evidence is a multivariate normal density evaluated at the observed $\mathbf{y}$, and `scipy` will compute it. (For nonlinear models the integral has to be done numerically, by a grid for a few parameters or by specialised sampling methods for more.)
+
+We take broad priors of standard deviation 5 on $a$ and $b$ in both models, and look at how the Bayes factor depends on the prior width for the curvature $c$.
+"""),
+
+code(r"""
+def log_evidence(G, y, sigma, prior_sd):
+    # linear model y = G θ + e, with θ ~ N(0, diag(prior_sd²)) and e ~ N(0, σ² I)
+    cov = G @ np.diag(np.square(prior_sd)) @ G.T + sigma**2 * np.eye(len(y))
+    return stats.multivariate_normal(mean=np.zeros(len(y)), cov=cov).logpdf(y)
+
+G1 = np.column_stack([x, np.ones_like(x)])
+G2 = np.column_stack([x, np.ones_like(x), x**2])
+
+lnZ1 = log_evidence(G1, y, sigma, [5, 5])
+print("data generated from a straight line:")
+for sd_c in [0.1, 1, 10, 100]:
+    lnZ2 = log_evidence(G2, y, sigma, [5, 5, sd_c])
+    print(f"   prior sd on c = {sd_c:5.1f}:  ln B21 = {lnZ2 - lnZ1:6.2f},  B21 = {np.exp(lnZ2 - lnZ1):.3g}")
+
+# For comparison, the best-fit chi-squared of each model
+chi2_1 = np.sum(((y - G1 @ np.linalg.lstsq(G1, y, rcond=None)[0]) / sigma)**2)
+chi2_2 = np.sum(((y - G2 @ np.linalg.lstsq(G2, y, rcond=None)[0]) / sigma)**2)
+print(f"   best-fit χ²: line {chi2_1:.1f}, quadratic {chi2_2:.1f}  (the quadratic always fits at least as well)")
+"""),
+
+md(r"""
+The quadratic fits slightly better at its best parameters, as it must, but for any prior wide enough to allow visible curvature the Bayes factor favours the straight line, and does so more strongly the wider the prior on $c$: the more curvature the alternative allows, the more of its prior probability is wasted on curvatures the data rule out. (In the limit of an infinitely wide prior the simpler model always wins, whatever the data; this is the **Lindley paradox**, and it is the reason improper "flat" priors cannot be used for model comparison, though they are harmless for parameter estimation.)
+
+Now generate data that really are curved, and repeat.
+"""),
+
+code(r"""
+y_curved = 2*x - 4 + 1.5*x**2 + stats.norm(0, sigma).rvs(len(x), random_state=rng)
+lnZ1 = log_evidence(G1, y_curved, sigma, [5, 5])
+print("data generated from a quadratic with c = 1.5:")
+for sd_c in [0.1, 1, 10, 100]:
+    lnZ2 = log_evidence(G2, y_curved, sigma, [5, 5, sd_c])
+    print(f"   prior sd on c = {sd_c:5.1f}:  ln B21 = {lnZ2 - lnZ1:6.2f}")
+"""),
+
+md(r"""
+Now the evidence for the quadratic is overwhelming for any reasonable prior: when the data demand the extra parameter, the Occam penalty is a small price. Only the very narrow prior (sd 0.1, which barely allows $c = 1.5$) gives weak support, and that is because it is the wrong alternative. Note too that the evidence still falls slowly as the prior widens beyond what is needed; the penalty for vagueness never goes away.
+
+Two practical notes. The evidence integral is expensive for models with many parameters, and the approximation $\ln p(D \mid H) \approx \ln L_{\max} - \tfrac{k}{2}\ln n$ (for $k$ parameters and $n$ data), which gives the **Bayesian information criterion**, is often used instead; it captures the Occam penalty without needing a prior, at the cost of being only a large-$n$ approximation. And model comparison of this kind assumes that one of the models is *right*; if both are wrong, the Bayes factor tells you which is less wrong, and posterior predictive checks (does the model reproduce the features of the data?) are the necessary complement.
+"""),
+
+md(r"""
 ## Bayesian and frequentist: a comparison
 
 | | Frequentist | Bayesian |
@@ -288,7 +395,8 @@ md(r"""
 | Point estimate | maximum likelihood | posterior mean, median or mode |
 | Interval | confidence: covers the truth in 95% of repetitions | credible: 95% probability the truth is inside |
 | Nuisance parameters | profile (optimise over them) | marginalise (integrate over them) |
-| Model checking | hypothesis tests, p-values | posterior predictive checks, Bayes factors |
+| Comparing hypotheses | a test with a p-value against the null | the Bayes factor (evidence ratio), which can favour either |
+| Model checking | residual tests | posterior predictive checks |
 | Main computation | optimisation | integration, usually by MCMC |
 
 With plentiful data and weak priors the two give the same numbers, and most working scientists move between them as convenient. The Bayesian approach is more natural when prior information is genuinely available, when parameters are many and the question is about a few, and when the answer needed is a probability. The frequentist approach needs no prior, and its tests and error rates are well understood. Whichever you use, say which, and say what your intervals mean.
@@ -377,6 +485,25 @@ print(f"MCMC: b = {bs.mean():.4f} ± {bs.std():.4f}")
 ```
 
 The tiny step gives a chain that accepts almost everything but moves so slowly that 3000 steps do not even reach the posterior; the huge step is rejected almost always and the trace is a staircase. The intermediate step mixes well and its histogram matches the exact gamma posterior.
+"""),
+
+exercise(4, r"""
+Simulate coin tosses from a genuinely fair coin ($\theta = 1/2$) and, as the number of tosses $n$ grows to 10,000, compute both the Bayes factor $B_{01}$ for "$\theta = 1/2$" against a uniform alternative, and the p-value for the same null. Plot both against $n$ on a log axis. What does each do as the evidence accumulates? Repeat once or twice with different random seeds.
+"""),
+scratch(),
+solution(r"""
+```python
+tosses = stats.bernoulli(0.5).rvs(10_000, random_state=rng)
+ns = np.unique(np.logspace(1, 4, 60).astype(int))
+B01 = [bayes_factor_01(tosses[:n].sum(), n, 0.5) for n in ns]
+pv = [stats.binomtest(int(tosses[:n].sum()), n, 0.5).pvalue for n in ns]
+fig, ax = plt.subplots(1, 2, figsize=(11, 4))
+ax[0].loglog(ns, B01); ax[0].axhline(1, color="k", lw=1); ax[0].set(xlabel="n", ylabel="B₀₁ for a fair coin")
+ax[1].semilogx(ns, pv); ax[1].axhline(0.05, color="k", lw=1, ls="--"); ax[1].set(xlabel="n", ylabel="p-value", ylim=(0, 1))
+plt.show()
+```
+
+The Bayes factor grows steadily in favour of the true hypothesis, roughly as $\sqrt{n}$, reaching decisive support by a few thousand tosses. The p-value wanders around at random and never settles: under a true null it is uniformly distributed at every $n$, so it dips below 0.05 about one time in twenty no matter how much data you have. A p-value cannot accumulate evidence for a null hypothesis; a Bayes factor can, which is one reason it is the natural tool for questions of the form "is this simple hypothesis adequate?"
 """),
 ]
 

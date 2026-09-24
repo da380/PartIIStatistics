@@ -119,14 +119,18 @@ $$
 \sigma_y^2 \approx \sum_{i} \left(\frac{\partial f}{\partial x_i}\right)^2 \sigma_i^2 ,
 $$
 
-which is the "add the errors in quadrature" rule taught in every laboratory course. Some familiar corollaries, all for uncorrelated inputs:
+which is the "add the errors in quadrature" rule taught in every laboratory course. Some familiar corollaries follow, all for uncorrelated inputs:
 
-| $f$ | result |
-|---|---|
-| $y = x_1 + x_2$ or $x_1 - x_2$ | $\sigma_y^2 = \sigma_1^2 + \sigma_2^2$ |
-| $y = x_1 x_2$ or $x_1 / x_2$ | $(\sigma_y / y)^2 = (\sigma_1/x_1)^2 + (\sigma_2/x_2)^2$ |
-| $y = x^p$ | $\sigma_y / y = \lvert p \rvert\, \sigma_x / x$ |
-| $y = \ln x$ | $\sigma_y = \sigma_x / x$ |
+$$
+\begin{aligned}
+y = x_1 + x_2 \ \text{ or } \ x_1 - x_2 : &\qquad \sigma_y^2 = \sigma_1^2 + \sigma_2^2 \\[6pt]
+y = x_1 x_2 \ \text{ or } \ x_1 / x_2 : &\qquad \left(\frac{\sigma_y}{y}\right)^2 = \left(\frac{\sigma_1}{x_1}\right)^2 + \left(\frac{\sigma_2}{x_2}\right)^2 \\[6pt]
+y = x^p : &\qquad \frac{\sigma_y}{y} = |p|\,\frac{\sigma_x}{x} \\[6pt]
+y = \ln x : &\qquad \sigma_y = \frac{\sigma_x}{x}
+\end{aligned}
+$$
+
+Absolute errors add in quadrature for sums and differences; *relative* errors add in quadrature for products and quotients.
 
 The general formula is easy to apply in code with a matrix product. For our linear $f$ the gradient is $(2, 3)$ and, because $f$ is exactly linear and the inputs are normal, the result is exact rather than approximate.
 """),
