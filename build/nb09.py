@@ -316,7 +316,11 @@ md(r"""
 
 The toy problem divided the block into 144 cells, so its null space had at most 144 dimensions. Really the unknown slowness is a *function* of position, and the null space is infinite-dimensional: there are infinitely many independent ways to change a function without changing a finite set of travel times. Working with functions directly needs a little more mathematics (Hilbert spaces of functions, and Gaussian measures on them, in place of vectors and covariance matrices), but the structure of the calculation is exactly as above.
 
-The Python library [`pygeoinf`](https://github.com/da380/pygeoinf), developed in this department, provides that machinery. Below we repeat the tomography experiment for a slowness function on a rectangular region, represented by 16,384 Fourier coefficients, observed through 144 straight rays. Run the first cell to install the library if it is missing (it needs Python 3.12 or later, which Colab provides).
+There is an important conceptual difference, though. When we chopped the block into cells, the grid was *part of the model*: a 12 × 12 inversion and a 24 × 24 inversion of the same data are different problems with different answers, and nothing says which is right. In the function-space formulation the prior, the forward problem and the posterior are all defined for the function itself, with no grid anywhere, and the posterior is a mathematically well-defined object. A Fourier expansion is then only a *numerical approximation* to it. As the truncation degree is increased the computed mean, samples and uncertainties converge to something definite, and for a given prior one can work out in advance how many terms are needed: the library does this below, adding degrees until the last one carries less than one part in a million of the prior's expected energy. The number of parameters is a numerical resolution, chosen so that the answer is converged, not a modelling choice that changes the answer.
+
+The Python library [`pygeoinf`](https://github.com/da380/pygeoinf), developed in this department, provides that machinery. Below we repeat the tomography experiment for a slowness function on a rectangular region, observed through straight rays between a set of sources and a set of receivers. Run the first cell to install the library if it is missing (it needs Python 3.12 or later, which Colab provides).
+
+In Colab, the second cell shows two sliders for the numbers of sources and receivers; every source is connected to every receiver, so the number of rays is their product. The default of 12 and 12 gives 144 rays and runs in seconds. You can push it to 2,500 rays, but expect the later cells to take a few minutes at the top of the range. (Outside Colab the sliders do not appear; just edit the two numbers.)
 """),
 
 code(r"""
@@ -336,21 +340,29 @@ model_space = Sobolev.from_heat_kernel_prior(prior_scale, order, sobolev_scale,
                                              ax=0.0, bx=6.0, cx=0.5, ay=0.0, by=6.0, cy=0.5,
                                              power_of_two=True, min_degree=32)
 prior = model_space.point_value_scaled_heat_kernel_gaussian_measure(prior_scale)
-print(f"model space dimension: {model_space.dim}")
+print(f"truncation degree chosen for this prior: {model_space.degree}, giving {model_space.dim} coefficients")
 
-# The forward problem: 12 sources, 12 receivers, a ray from every source to every receiver
-sources, receivers = model_space.random_points(12), model_space.random_points(12)
+# The forward problem: a ray from every source to every receiver. In Colab, use the sliders.
+n_sources = 12    # @param {type:"slider", min:2, max:50, step:1}
+n_receivers = 12  # @param {type:"slider", min:2, max:50, step:1}
+sources, receivers = model_space.random_points(n_sources), model_space.random_points(n_receivers)
 paths = [(src, rec) for src in sources for rec in receivers]
-T = model_space.path_average_operator(paths)
+# The ray integrals are applied by non-uniform FFTs (matrix_free=True) rather than stored as a matrix,
+# so thousands of rays cost little memory.
+T = model_space.path_average_operator(paths, matrix_free=True)
 tomo = inf.LinearForwardProblem(T, data_error_measure=inf.GaussianMeasure.from_standard_deviation(T.codomain, 0.05))
 print(f"{len(paths)} travel-time data")
+
+# A coarse-resolution copy of the ray operator, used below to build preconditioners
+coarse = model_space.with_degree(model_space.degree // 4)
+coarse_T = coarse.path_average_operator(paths)
 
 # A true model drawn from the prior, and its noisy travel times
 u_true, d = tomo.joint_measure(prior).sample()
 
 fig, ax = plt.subplots(1, 3, figsize=(15, 4.5))
 plot(model_space, u_true, ax=ax[0], symmetric=True, cmap="RdBu_r", colorbar=True)
-plot_geodesic_network(paths, ax=ax[0], alpha=0.15, color="black"); ax[0].set_title("true slowness and the 144 rays")
+plot_geodesic_network(paths, ax=ax[0], alpha=min(0.15, 30 / len(paths)), color="black"); ax[0].set_title(f"true slowness and the {len(paths)} rays")
 for a in ax[1:]:
     plot(model_space, prior.sample(), ax=a, symmetric=True, cmap="RdBu_r", colorbar=True); a.set_title("a prior sample")
 plt.show()
@@ -359,17 +371,19 @@ plt.show()
 md(r"""
 ### The simplest function that fits the data
 
-The minimum-norm solution now means the *smoothest* function (smallest norm in the chosen function space) whose predicted travel times fit the data to within their errors. Fitting exactly would be foolish with noisy data, so the library finds the smallest-norm function with $\chi^2$ at the 95% critical value: the discrepancy principle from earlier, built in.
+The minimum-norm solution now means the *smoothest* function (smallest norm in the chosen function space) whose predicted travel times fit the data to within their errors. Fitting exactly would be foolish with noisy data, so the library finds the smallest-norm function with $\chi^2$ at the 95% critical value: the discrepancy principle from earlier, built in. The search involves solving a linear system in data space several times over, and we solve each by conjugate gradients with a **preconditioner** built from the coarse copy of the ray operator; the same device is used for the Bayesian solution below, where it is explained.
 """),
 
 code(r"""
-u_min = inf.LinearMinimumNormInversion(tomo).minimum_norm_operator(inf.CholeskySolver())(d)
+chol = inf.CholeskySolver(galerkin=True)
+precon_mn = inf.LinearLeastSquaresInversion(tomo).surrogate_woodbury_data_preconditioner(1.0, chol, alternate_forward_operator=coarse_T)
+u_min = inf.LinearMinimumNormInversion(tomo).minimum_norm_operator(inf.CGMatrixSolver(), preconditioner=precon_mn)(d)
 print(f"χ² of the minimum-norm model = {tomo.chi_squared(u_min, d):.1f};  95% critical value for {len(paths)} data = {tomo.critical_chi_squared(0.95):.1f}")
 
 fig, ax = plt.subplots(1, 2, figsize=(10, 4.5))
 plot(model_space, u_true, ax=ax[0], symmetric=True, cmap="RdBu_r", colorbar=True); ax[0].set_title("true slowness")
 plot(model_space, u_min, ax=ax[1], symmetric=True, cmap="RdBu_r", colorbar=True)
-plot_geodesic_network(paths, ax=ax[1], alpha=0.15, color="black"); ax[1].set_title("minimum-norm (smoothest) model fitting the data")
+plot_geodesic_network(paths, ax=ax[1], alpha=min(0.15, 30 / len(paths)), color="black"); ax[1].set_title("minimum-norm (smoothest) model fitting the data")
 plt.show()
 """),
 
@@ -378,43 +392,36 @@ The smoothest data-fitting function captures the broad pattern where rays are de
 
 ### The Bayesian solution
 
-With the prior above, the posterior is again Gaussian and we can draw samples from it, compute its mean, and map its pointwise standard deviation. The linear system to be solved has 16,384 unknowns, and the library solves it iteratively by conjugate gradients. Left to itself the solver needs a couple of hundred iterations; a **preconditioner** built from a coarse-resolution surrogate of the same problem (the Woodbury identity applied to a low-resolution prior) reduces this to a handful, which is what makes problems with millions of unknowns feasible. Here the problem is small enough that either works, and we print both iteration counts.
+With the prior above, the posterior is again Gaussian and we can draw samples from it, compute its mean, and map its pointwise standard deviation. The linear system to be solved has 16,384 unknowns, and the library solves it iteratively by conjugate gradients, helped by a **preconditioner** built from a coarse-resolution surrogate of the same problem. The preconditioner cuts the iteration count from hundreds to a handful, and since every posterior sample needs its own solve, that is what makes the uncertainty maps cheap; the same idea scales to problems with millions of unknowns.
 """),
 
 code(r"""
 inversion = inf.LinearBayesianInversion(tomo, prior)
 
-# Without a preconditioner
-plain = inf.CGMatrixSolver()
-posterior = inversion.model_posterior_measure(d, plain)
-print(f"conjugate gradients without preconditioning: {plain.iterations} iterations")
-
-# With a surrogate Woodbury preconditioner built at a quarter of the resolution
-coarse = model_space.with_degree(model_space.degree // 4)
+# A surrogate Woodbury preconditioner built from the quarter-resolution copy of the problem
 coarse_prior = coarse.point_value_scaled_heat_kernel_gaussian_measure(prior_scale)
-chol = inf.CholeskySolver(galerkin=True)
 precon = inversion.surrogate_inversion(
-    alternate_forward_operator=coarse.path_average_operator(paths),
+    alternate_forward_operator=coarse_T,
     alternate_prior_measure=coarse_prior.with_regularized_inverse(chol, damping=1e-6),
 ).woodbury_data_preconditioner(chol)
-fast = inf.CGMatrixSolver()
-posterior = inversion.model_posterior_measure(d, fast, preconditioner=precon)
-print(f"with the surrogate preconditioner:           {fast.iterations} iterations")
+solver = inf.CGMatrixSolver()
+posterior = inversion.model_posterior_measure(d, solver, preconditioner=precon)
+print(f"posterior computed in {solver.iterations} conjugate-gradient iterations")
 
 u_mean = posterior.expectation
-u_std = posterior.sample_pointwise_std(100)
+u_std = posterior.sample_pointwise_std(50)
 
 fig, ax = plt.subplots(2, 2, figsize=(11, 9))
 plot(model_space, u_true, ax=ax[0, 0], symmetric=True, cmap="RdBu_r", colorbar=True); ax[0, 0].set_title("true slowness")
 plot(model_space, u_mean, ax=ax[0, 1], symmetric=True, cmap="RdBu_r", colorbar=True); ax[0, 1].set_title("posterior mean")
 plot(model_space, posterior.sample(), ax=ax[1, 0], symmetric=True, cmap="RdBu_r", colorbar=True); ax[1, 0].set_title("a posterior sample")
 plot(model_space, u_std, ax=ax[1, 1], cmap="viridis", colorbar=True)
-plot_geodesic_network(paths, ax=ax[1, 1], alpha=0.15, color="white"); ax[1, 1].set_title("posterior standard deviation")
+plot_geodesic_network(paths, ax=ax[1, 1], alpha=min(0.15, 30 / len(paths)), color="white"); ax[1, 1].set_title("posterior standard deviation")
 plt.show()
 """),
 
 md(r"""
-This is the toy problem again, with all the same features: a mean that is a smoothed version of the truth, samples that agree where the rays are dense and wander where they are not, and a standard-deviation map that traces the ray coverage. Two things have changed. The unknown now has 16,384 degrees of freedom against 144 data, so the null space is vast, and yet the calculation took a few seconds. And nothing in the inversion code referred to the geometry: the lines that set up the prior, the forward problem and the posterior would be identical for slowness on a sphere observed by a global seismic network. That separation of the mathematics from the geometry is what the library is for. Its [tutorials](https://github.com/da380/pygeoinf/tree/main/tutorials) run the same tomography on a line, a circle, a torus, a plane and a sphere.
+This is the toy problem again, with all the same features: a mean that is a smoothed version of the truth, samples that agree where the rays are dense and wander where they are not, and a standard-deviation map that traces the ray coverage. Move the sliders up and rerun the cells from there to watch the posterior sharpen as the coverage improves. Three things have changed. The unknown now has 16,384 degrees of freedom against a few hundred data, so the null space is vast, and yet the calculation took seconds. Those 16,384 coefficients are a converged approximation to the posterior for the *function*: doubling the truncation degree would reproduce the same pictures, whereas doubling the number of cells in the toy problem gave a different problem. And nothing in the inversion code referred to the geometry: the lines that set up the prior, the forward problem and the posterior would be identical for slowness on a sphere observed by a global seismic network. That separation of the mathematics from the geometry is what the library is for. Its [tutorials](https://github.com/da380/pygeoinf/tree/main/tutorials) run the same tomography on a line, a circle, a torus, a plane and a sphere.
 """),
 
 md(r"""
@@ -425,6 +432,7 @@ md(r"""
 - Small singular values amplify noise; damping (regularisation) trades data fit for model simplicity, and the trade-off curve makes the choice visible.
 - The resolution matrix says which average of the truth each element of the estimate represents. Look at it.
 - Regularisation is a prior. The Bayesian posterior gives uncertainties and samples that show what the data leave open.
+- Posing the problem for the function itself, rather than for a grid of cells, gives a well-defined answer that numerical expansions merely approximate, and converge to.
 
 **Further reading.** R. L. Parker, *Geophysical Inverse Theory* (Princeton), is the classic account of these ideas, and A. Tarantola, *Inverse Problem Theory* (SIAM, free online), the standard reference for the Bayesian view. The `pygeoinf` documentation at https://pygeoinf.readthedocs.io has worked examples on the line, circle, plane and sphere.
 """),
@@ -473,45 +481,36 @@ Noisier data require heavier effective damping, the number of resolved parameter
 """),
 
 exercise(3, r"""
-In the `pygeoinf` tomography, the ray coverage and the prior are the two things that determine what the data can say. (a) Repeat the Bayesian inversion with 4 sources and 4 receivers (16 rays), and with 20 of each (400 rays); compare the posterior standard-deviation maps. (Each inversion takes some tens of seconds; use the surrogate preconditioner, since every posterior sample needs a solve.) (b) With the original 144 rays, halve and double the prior's scale parameter (the argument of `point_value_scaled_heat_kernel_gaussian_measure`, keeping the model space as it is), and see how the posterior mean and its uncertainty respond. In each case, where does the prior matter most?
+In the `pygeoinf` tomography, the ray coverage and the prior are the two things that determine what the data can say. (a) Using the sliders, rerun the section with 4 sources and 4 receivers (16 rays) and then with 40 of each (1,600 rays); compare the minimum-norm models and the posterior standard-deviation maps. (b) Back at 12 and 12, halve and double the prior's scale parameter (the argument of `point_value_scaled_heat_kernel_gaussian_measure`, keeping the model space as it is), and see how the posterior mean and its uncertainty respond. In each case, where does the prior matter most?
 """),
 scratch(),
 solution(r"""
+For (a) the sliders do the work. With 16 rays the minimum-norm model is little more than a few smooth streaks along the rays, the posterior mean is much the same, and the uncertainty is close to the prior almost everywhere. With 1,600 rays the mean reproduces the truth in detail, and the uncertainty is small except in the margins, where rays are sparse.
+
+For (b), the following reruns the inversion with the same rays and data-error level but a new prior each time:
+
 ```python
-def invert(n_src, n_rec, prior_scale, space=model_space):
+def invert(prior_scale, space=model_space):
     pr = space.point_value_scaled_heat_kernel_gaussian_measure(prior_scale)
-    pths = [(s_, r_) for s_ in space.random_points(n_src) for r_ in space.random_points(n_rec)]
-    op = space.path_average_operator(pths)
-    prob = inf.LinearForwardProblem(op, data_error_measure=inf.GaussianMeasure.from_standard_deviation(op.codomain, 0.05))
-    truth, data = prob.joint_measure(pr).sample()
-    inv = inf.LinearBayesianInversion(prob, pr)
-    coarse = space.with_degree(space.degree // 4)                 # the surrogate preconditioner, as in the text:
-    chol = inf.CholeskySolver(galerkin=True)                      # every posterior sample needs a solve, so it pays off
-    precon = inv.surrogate_inversion(
-        alternate_forward_operator=coarse.path_average_operator(pths),
+    truth, data = tomo.joint_measure(pr).sample()
+    inv = inf.LinearBayesianInversion(tomo, pr)
+    pre = inv.surrogate_inversion(
+        alternate_forward_operator=coarse_T,
         alternate_prior_measure=coarse.point_value_scaled_heat_kernel_gaussian_measure(prior_scale).with_regularized_inverse(chol, damping=1e-6),
     ).woodbury_data_preconditioner(chol)
-    post = inv.model_posterior_measure(data, inf.CGMatrixSolver(), preconditioner=precon)
-    return space, pths, truth, post.expectation, post.sample_pointwise_std(30)
-
-fig, ax = plt.subplots(2, 3, figsize=(15, 9))
-for row, (n_src, n_rec) in zip(ax, [(4, 4), (20, 20)]):
-    space, pths, truth, mean, sd = invert(n_src, n_rec, 0.1)
-    plot(space, truth, ax=row[0], symmetric=True, cmap="RdBu_r", colorbar=True); row[0].set_title(f"truth, {len(pths)} rays")
-    plot(space, mean, ax=row[1], symmetric=True, cmap="RdBu_r", colorbar=True); row[1].set_title("posterior mean")
-    plot(space, sd, ax=row[2], cmap="viridis", colorbar=True); plot_geodesic_network(pths, ax=row[2], alpha=0.1, color="white"); row[2].set_title("posterior sd")
-plt.show()
+    post = inv.model_posterior_measure(data, inf.CGMatrixSolver(), preconditioner=pre)
+    return truth, post.expectation, post.sample_pointwise_std(30)
 
 fig, ax = plt.subplots(2, 3, figsize=(15, 9))
 for row, ps in zip(ax, [0.05, 0.2]):
-    space, pths, truth, mean, sd = invert(12, 12, ps)
-    plot(space, truth, ax=row[0], symmetric=True, cmap="RdBu_r", colorbar=True); row[0].set_title(f"truth, prior scale {ps}")
-    plot(space, mean, ax=row[1], symmetric=True, cmap="RdBu_r", colorbar=True); row[1].set_title("posterior mean")
-    plot(space, sd, ax=row[2], cmap="viridis", colorbar=True); row[2].set_title("posterior sd")
+    truth, mean, sd = invert(ps)
+    plot(model_space, truth, ax=row[0], symmetric=True, cmap="RdBu_r", colorbar=True); row[0].set_title(f"truth, prior scale {ps}")
+    plot(model_space, mean, ax=row[1], symmetric=True, cmap="RdBu_r", colorbar=True); row[1].set_title("posterior mean")
+    plot(model_space, sd, ax=row[2], cmap="viridis", colorbar=True); row[2].set_title("posterior sd")
 plt.show()
 ```
 
-With 16 rays the posterior mean is little more than a few smooth streaks along the rays and the uncertainty is close to the prior almost everywhere; with 400 rays the mean reproduces the truth in detail and the uncertainty is small except in the margins. A small prior scale allows fine structure the rays cannot resolve, so the posterior stays uncertain between rays; a large one lets each ray constrain a broad neighbourhood, narrowing the posterior everywhere but at the risk of smoothing away real features. In every case the prior matters most where the ray coverage is poorest, which is exactly where the data leave the problem underdetermined.
+A small prior scale allows fine structure the rays cannot resolve, so the posterior stays uncertain between rays; a large one lets each ray constrain a broad neighbourhood, narrowing the posterior everywhere but at the risk of smoothing away real features. In every case the prior matters most where the ray coverage is poorest, which is exactly where the data leave the problem underdetermined.
 """),
 ]
 
