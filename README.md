@@ -46,7 +46,7 @@ The notebooks are generated from source files in the [`build`](build) folder, wh
 
 ## Q&A session
 
-There will be a Q&A session on the material towards the end of term, where you can ask about anything in the notebooks. The date and time will be announced separately.
+There will be a Q&A session on the material on **Friday 20th November, 12–1 pm, in Harker 1**, where you can ask about anything in the notebooks.
 
 ## Issues or feedback
 
