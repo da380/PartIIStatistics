@@ -38,10 +38,13 @@ t_k = \sum_{j} G_{kj}\, m_j, \qquad G_{kj} = \text{length of ray } k \text{ in c
 $$
 
 This is a miniature version of seismic tomography. The function below builds $\mathbf{G}$ for any set of straight rays by sampling each ray finely and accumulating the length in each cell. We start with a very sparse experiment: one horizontal and one vertical ray through each row and column of cells.
+
+The number of cells along each side, $N$, is set by a slider in the next cell (in Colab; elsewhere edit the number). Work through the section once at the default $N = 12$, to which the numbers quoted in the text refer, and then come back and change it: the choice of grid is part of the model, and seeing how the answers change with it is the point of the last part of the notebook.
 """),
 
 code(r'''
-N = 12                                   # the block is N x N cells on the unit square
+N = 12  # @param {type:"slider", min:4, max:32, step:1}
+# The block is N x N cells on the unit square
 M = N * N                                # number of model parameters (cell slownesses)
 
 def ray_matrix(rays, N, n_pts=4000):
@@ -82,7 +85,7 @@ plt.show()
 md(r"""
 ## Non-uniqueness and the null space
 
-With 24 travel times and 144 unknowns we clearly cannot determine every cell. But the situation is worse than "not enough equations": the equations we have are not even independent. The sum of the horizontal travel times equals the sum of the vertical ones (both are the total slowness times the cell size), so only 23 of the 24 data carry independent information.
+With $2N$ travel times and $N^2$ unknowns (24 and 144 for the default grid) we clearly cannot determine every cell. But the situation is worse than "not enough equations": the equations we have are not even independent. The sum of the horizontal travel times equals the sum of the vertical ones (both are the total slowness times the cell size), so only $2N - 1$ of the $2N$ data carry independent information.
 
 The **singular value decomposition** (SVD), $\mathbf{G} = \mathbf{U}\mathbf{S}\mathbf{V}^T$, is the tool for seeing this. The columns of $\mathbf{V}$ are orthonormal directions in model space; each is mapped by $\mathbf{G}$ onto the corresponding column of $\mathbf{U}$, scaled by its singular value $s_i$. The number of non-zero singular values is the **rank** of $\mathbf{G}$, the number of independent pieces of information in the data. The remaining directions in model space form the **null space**: models that produce *no data at all*. Adding any null-space model to a solution leaves the predicted data unchanged.
 """),
@@ -106,7 +109,7 @@ print(f"maximum difference in predicted travel times between left and right mode
 '''),
 
 md(r"""
-The models on the left and right predict *identical* travel times, to machine precision, yet one is smooth and the other is riddled with structure. No amount of measurement precision can distinguish them: the difference between them is invisible to this experiment. A 121-dimensional family of models fits the data exactly, and the data cannot tell them apart.
+The models on the left and right predict *identical* travel times, to machine precision, yet one is smooth and the other is riddled with structure. No amount of measurement precision can distinguish them: the difference between them is invisible to this experiment. A family of models with $N^2 - 2N + 1$ dimensions (121 for the default grid) fits the data exactly, and the data cannot tell them apart.
 
 This is the sense in which the inverse problem "has no answer". It is not a matter of noise or of insufficient care. It follows from the geometry of the experiment, and the only cures are more (or better placed) data or extra information from outside the data.
 """),
@@ -136,25 +139,26 @@ The minimum-norm model fits the data perfectly and looks nothing like the truth:
 md(r"""
 ## A better experiment, noise, and instability
 
-Let us add a fan of crossing rays, from each of $N$ points on the left edge to each of $N$ points on the right edge. That gives $N^2 + 2N = 168$ rays for 144 unknowns, so the problem is now formally overdetermined. Is it solved?
+Let us add a fan of crossing rays, from each of $n$ points on the left edge to each of $n$ points on the right edge, with $n$ set by the slider in the next cell (in Colab; elsewhere edit the number). The default $n = 12$ gives $144 + 24 = 168$ rays for 144 unknowns, so the problem is now formally overdetermined. Is it solved? Try other values later and rerun from here: the printed rank and the singular-value plot tell the story for any fan size.
 """),
 
 code(r'''
-edge = (np.arange(N) + 0.5) / N
+n_fan = 12  # @param {type:"slider", min:2, max:40, step:1}
+edge = (np.arange(n_fan) + 0.5) / n_fan
 rays2 = rays + [((0, a), (1, b)) for a in edge for b in edge]
 G2 = ray_matrix(rays2, N)
 U2, s2, Vt2 = np.linalg.svd(G2)
 print(f"{len(rays2)} rays;  rank of G2 = {np.linalg.matrix_rank(G2)}")
 
 fig, ax = plt.subplots()
-ax.semilogy(np.arange(1, len(s) + 1), s, "o", label="24 rays")
-ax.semilogy(np.arange(1, len(s2) + 1), s2, "s", ms=3, label="168 rays")
+ax.semilogy(np.arange(1, len(s) + 1), s, "o", label=f"{len(rays)} rays")
+ax.semilogy(np.arange(1, len(s2) + 1), s2, "s", ms=3, label=f"{len(rays2)} rays")
 ax.set(xlabel="index", ylabel="singular value"); ax.legend()
 plt.show()
 '''),
 
 md(r"""
-Two things have happened. The rank has risen to 131, but not to 144: even 168 rays leave a 13-dimensional null space, because all the fan rays run broadly left to right and certain patterns of vertical variation are invisible to every one of them. And among the directions that *are* constrained, the singular values now span more than two orders of magnitude. The small ones correspond to model patterns that affect the data only weakly. In the inverse, those patterns are multiplied by $1/s_i$, so small errors in the data become large errors in the model. A problem with a wide range of singular values is **ill-conditioned**; for practical purposes it is still underdetermined, because real data always have errors.
+Two things have happened (the numbers here are for the default fan of 12). The rank has risen to 131, but not to 144: even 168 rays leave a 13-dimensional null space, because all the fan rays run broadly left to right and certain patterns of vertical variation are invisible to every one of them. A denser fan eventually brings the rank up to 144, but only by adding singular values that are tiny, which for practical purposes comes to the same thing. And among the directions that *are* constrained, the singular values now span more than two orders of magnitude. The small ones correspond to model patterns that affect the data only weakly. In the inverse, those patterns are multiplied by $1/s_i$, so small errors in the data become large errors in the model. A problem with a wide range of singular values is **ill-conditioned**; for practical purposes it is still underdetermined, because real data always have errors.
 
 To see this, add noise to the travel times and build the solution one singular vector at a time, from the best-constrained direction to the worst. Keeping the first $k$ terms is called **truncated SVD**:
 
@@ -177,7 +181,7 @@ model_error = [np.linalg.norm(tsvd(k) - m_true) for k in ks]
 data_misfit = [np.sum(((d_noisy - G2 @ tsvd(k)) / sigma_d)**2) for k in ks]
 
 fig, ax = plt.subplots(1, 5, figsize=(17, 3.6))
-for a, k in zip(ax[:4], [20, 60, 100, rank2]):
+for a, k in zip(ax[:4], [max(1, rank2 // 6), rank2 // 2, (4 * rank2) // 5, rank2]):
     show(tsvd(k), a, f"first {k} singular vectors", vmin=0.7, vmax=1.3)
 ax[4].semilogy(ks, model_error, label="model error ‖m̂ − m_true‖")
 ax[4].semilogy(ks, np.array(data_misfit) / len(d_noisy), label="data misfit χ²/n")
@@ -186,7 +190,7 @@ plt.tight_layout(); plt.show()
 '''),
 
 md(r"""
-Adding singular vectors first sharpens the image and then destroys it: beyond about a hundred terms the data misfit keeps falling but the model error rises, because the remaining terms are dominated by noise divided by small singular values. Fitting the data as well as possible is the *wrong* goal. The truncation point $k$ is a choice, and a different noise realisation would move it.
+Adding singular vectors first sharpens the image and then destroys it: beyond a certain point (about a hundred terms with the default fan) the data misfit keeps falling but the model error rises, because the remaining terms are dominated by noise divided by small singular values. Fitting the data as well as possible is the *wrong* goal. The truncation point $k$ is a choice, and a different noise realisation would move it.
 
 ### Regularisation
 
@@ -252,18 +256,19 @@ H = np.linalg.solve(G2.T @ G2 + lam_star * sigma_d**2 * np.eye(M), G2.T)     # t
 R = H @ G2                                                                    # resolution matrix
 
 fig, ax = plt.subplots(1, 3, figsize=(13, 4))
-for a, cell in zip(ax[:2], [(6, 6), (0, 11)]):
+for a, cell in zip(ax[:2], [(N // 2, N // 2), (0, N - 1)]):
     j = cell[0] + N * cell[1]
     show(R[j], a, f"resolving kernel for cell {cell}")
     a.plot((cell[0] + 0.5) / N, (cell[1] + 0.5) / N, "k+", ms=12)
-checker = np.where(((X * N // 2).astype(int) + (Y * N // 2).astype(int)) % 2 == 0, 0.2, -0.2).ravel()
+block = max(1, N // 6)                                                        # checkerboard squares of about 1/6 of the block
+checker = np.where(((X * N // block).astype(int) + (Y * N // block).astype(int)) % 2 == 0, 0.2, -0.2).ravel()
 show(m0 + R @ checker, ax[2], "checkerboard test (error-free)", vmin=0.7, vmax=1.3)
 plt.show()
 print(f"diagonal of R: mean {np.mean(np.diag(R)):.2f} (1 would be perfect resolution);  trace of R = {np.trace(R):.1f} 'resolved parameters' out of {M}")
 '''),
 
 md(r"""
-An interior cell is resolved as an average over a blob of neighbouring cells, elongated along the dominant ray direction. A corner cell, crossed by few rays, is resolved much more poorly. The trace of $\mathbf{R}$ counts the number of independent parameters the data really constrain at this level of damping, and it is a fraction of the 144 nominal unknowns. The checkerboard comes back blurred and attenuated, and worse near the edges.
+An interior cell is resolved as an average over a blob of neighbouring cells, elongated along the dominant ray direction. A corner cell, crossed by few rays, is resolved much more poorly. The trace of $\mathbf{R}$ counts the number of independent parameters the data really constrain at this level of damping, and it is a fraction of the $N^2$ nominal unknowns. The checkerboard comes back blurred and attenuated, and worse near the edges.
 
 Two warnings. Resolution says nothing about noise: a cell can be well resolved and still badly estimated if the data are poor. And the checkerboard test only tests checkerboards; a feature of a different shape or scale may be recovered better or worse.
 """),
@@ -309,18 +314,27 @@ md(r"""
 Prior samples are smooth random fields of the assumed amplitude and scale: what we thought plausible before looking at the data. Posterior samples all show the two anomalies, in roughly the right places, but differ in detail, particularly near the top and bottom edges where the fan rays are sparse and only the base rays pass: that is what the data leave undetermined. The posterior mean is the smooth compromise, and the standard deviation map shows where it can be trusted. Compare it with the resolving kernels above: the same geometry is at work.
 
 The prior is doing real work here, and a different prior (larger amplitude, shorter correlation length) would give different posterior samples from the same data. That is not a defect of the method; it is the non-uniqueness of the inverse problem made explicit. The data alone do not determine the model, so something else must, and the Bayesian formulation forces you to say what.
+
+### The effect of the discretisation
+
+Now go back to the top of this section, set $N$ to 24 or 32, and rerun the cells down to here. The rays and the true slowness field are unchanged; only the grid on which we chose to represent the unknown is finer. Watch what happens to each estimate.
+
+- The minimum-norm and damped least-squares images become streaky, with structure concentrated along the ray paths, and the resolving kernels turn into stars of rays. The norm $\|\mathbf{m} - \mathbf{m}_0\|$ that these methods minimise is a sum over cells: it penalises the *values* in each cell but says nothing about how neighbouring cells relate, so as the cells shrink nothing stops the solution from painting each ray as a thin stripe. The answer depends on $N$, and does not settle down as $N$ grows.
+- The Bayesian posterior mean, samples and standard deviation barely change. The prior was specified through a correlation length, a property of the *field* and not of the grid, so refining the grid merely approximates the same problem more finely. The answer converges.
+
+The difference is the whole of the next section: pose the problem for the function itself and the discretisation becomes a numerical detail rather than part of the model.
 """),
 
 md(r"""
 ## Optional: the same problem in function space with `pygeoinf`
 
-The toy problem divided the block into 144 cells, so its null space had at most 144 dimensions. Really the unknown slowness is a *function* of position, and the null space is infinite-dimensional: there are infinitely many independent ways to change a function without changing a finite set of travel times. Working with functions directly needs a little more mathematics (Hilbert spaces of functions, and Gaussian measures on them, in place of vectors and covariance matrices), but the structure of the calculation is exactly as above.
+The toy problem divided the block into $N^2$ cells, so its null space had at most $N^2$ dimensions. Really the unknown slowness is a *function* of position, and the null space is infinite-dimensional: there are infinitely many independent ways to change a function without changing a finite set of travel times. Working with functions directly needs a little more mathematics (Hilbert spaces of functions, and Gaussian measures on them, in place of vectors and covariance matrices), but the structure of the calculation is exactly as above.
 
-There is an important conceptual difference, though. When we chopped the block into cells, the grid was *part of the model*: a 12 × 12 inversion and a 24 × 24 inversion of the same data are different problems with different answers, and nothing says which is right. In the function-space formulation the prior, the forward problem and the posterior are all defined for the function itself, with no grid anywhere, and the posterior is a mathematically well-defined object. A Fourier expansion is then only a *numerical approximation* to it. As the truncation degree is increased the computed mean, samples and uncertainties converge to something definite, and for a given prior one can work out in advance how many terms are needed: the library does this below, adding degrees until the last one carries less than one part in a million of the prior's expected energy. The number of parameters is a numerical resolution, chosen so that the answer is converged, not a modelling choice that changes the answer.
+There is an important conceptual difference, though. When we chopped the block into cells and penalised a cell-by-cell norm, the grid was *part of the model*: as the slider showed, a 12 × 12 inversion and a 32 × 32 inversion of the same data give different answers, and nothing says which is right. Only when the prior was expressed through a correlation length, a property of the field rather than the grid, did the answer stop depending on $N$. In the function-space formulation the prior, the forward problem and the posterior are all defined for the function itself, with no grid anywhere, and the posterior is a mathematically well-defined object. A Fourier expansion is then only a *numerical approximation* to it. As the truncation degree is increased the computed mean, samples and uncertainties converge to something definite, and for a given prior one can work out in advance how many terms are needed: the library does this below, adding degrees until the last one carries less than one part in a million of the prior's expected energy. The number of parameters is a numerical resolution, chosen so that the answer is converged, not a modelling choice that changes the answer.
 
 The Python library [`pygeoinf`](https://github.com/da380/pygeoinf), developed in this department, provides that machinery. Below we repeat the tomography experiment for a slowness function on a rectangular region, observed through straight rays between a set of sources and a set of receivers. Run the first cell to install the library if it is missing (it needs Python 3.12 or later, which Colab provides).
 
-In Colab, the second cell shows two sliders for the numbers of sources and receivers; every source is connected to every receiver, so the number of rays is their product. The default of 12 and 12 gives 144 rays and runs in seconds. You can push it to 2,500 rays, but expect the later cells to take a few minutes at the top of the range. (Outside Colab the sliders do not appear; just edit the two numbers.)
+In Colab, the second cell shows three sliders: the numbers of sources and receivers, and the standard deviation of the travel-time errors. Every source is connected to every receiver, so the number of rays is their product. The default of 12 and 12 gives 144 rays and runs in seconds; you can push it to 2,500 rays, but expect the later cells to take a few minutes at the top of the range. The noise slider runs from errors far smaller than the signal (the prior gives the slowness a pointwise standard deviation of 1, and a typical ray integral is of order 1) up to errors as large as the signal. (Outside Colab the sliders do not appear; just edit the numbers.)
 """),
 
 code(r"""
@@ -345,13 +359,14 @@ print(f"truncation degree chosen for this prior: {model_space.degree}, giving {m
 # The forward problem: a ray from every source to every receiver. In Colab, use the sliders.
 n_sources = 12    # @param {type:"slider", min:2, max:50, step:1}
 n_receivers = 12  # @param {type:"slider", min:2, max:50, step:1}
+noise_sd = 0.05   # @param {type:"slider", min:0.01, max:1.0, step:0.01}
 sources, receivers = model_space.random_points(n_sources), model_space.random_points(n_receivers)
 paths = [(src, rec) for src in sources for rec in receivers]
 # The ray integrals are applied by non-uniform FFTs (matrix_free=True) rather than stored as a matrix,
 # so thousands of rays cost little memory.
 T = model_space.path_average_operator(paths, matrix_free=True)
-tomo = inf.LinearForwardProblem(T, data_error_measure=inf.GaussianMeasure.from_standard_deviation(T.codomain, 0.05))
-print(f"{len(paths)} travel-time data")
+tomo = inf.LinearForwardProblem(T, data_error_measure=inf.GaussianMeasure.from_standard_deviation(T.codomain, noise_sd))
+print(f"{len(paths)} travel-time data with error standard deviation {noise_sd}")
 
 # A coarse-resolution copy of the ray operator, used below to build preconditioners
 coarse = model_space.with_degree(model_space.degree // 4)
@@ -421,7 +436,7 @@ plt.show()
 """),
 
 md(r"""
-This is the toy problem again, with all the same features: a mean that is a smoothed version of the truth, samples that agree where the rays are dense and wander where they are not, and a standard-deviation map that traces the ray coverage. Move the sliders up and rerun the cells from there to watch the posterior sharpen as the coverage improves. Three things have changed. The unknown now has 16,384 degrees of freedom against a few hundred data, so the null space is vast, and yet the calculation took seconds. Those 16,384 coefficients are a converged approximation to the posterior for the *function*: doubling the truncation degree would reproduce the same pictures, whereas doubling the number of cells in the toy problem gave a different problem. And nothing in the inversion code referred to the geometry: the lines that set up the prior, the forward problem and the posterior would be identical for slowness on a sphere observed by a global seismic network. That separation of the mathematics from the geometry is what the library is for. Its [tutorials](https://github.com/da380/pygeoinf/tree/main/tutorials) run the same tomography on a line, a circle, a torus, a plane and a sphere.
+This is the toy problem again, with all the same features: a mean that is a smoothed version of the truth, samples that agree where the rays are dense and wander where they are not, and a standard-deviation map that traces the ray coverage. Move the sliders up and rerun the cells from there to watch the posterior sharpen as the coverage improves. Three things have changed. The unknown now has 16,384 degrees of freedom against a few hundred data, so the null space is vast, and yet the calculation took seconds. Those 16,384 coefficients are a converged approximation to the posterior for the *function*: doubling the truncation degree would reproduce the same pictures, just as refining the grid left the Bayesian toy result unchanged, whereas the cell-norm inversions changed character with every $N$. And nothing in the inversion code referred to the geometry: the lines that set up the prior, the forward problem and the posterior would be identical for slowness on a sphere observed by a global seismic network. That separation of the mathematics from the geometry is what the library is for. Its [tutorials](https://github.com/da380/pygeoinf/tree/main/tutorials) run the same tomography on a line, a circle, a torus, a plane and a sphere.
 """),
 
 md(r"""
@@ -481,11 +496,11 @@ Noisier data require heavier effective damping, the number of resolved parameter
 """),
 
 exercise(3, r"""
-In the `pygeoinf` tomography, the ray coverage and the prior are the two things that determine what the data can say. (a) Using the sliders, rerun the section with 4 sources and 4 receivers (16 rays) and then with 40 of each (1,600 rays); compare the minimum-norm models and the posterior standard-deviation maps. (b) Back at 12 and 12, halve and double the prior's scale parameter (the argument of `point_value_scaled_heat_kernel_gaussian_measure`, keeping the model space as it is), and see how the posterior mean and its uncertainty respond. In each case, where does the prior matter most?
+In the `pygeoinf` tomography, the ray coverage and the prior are the two things that determine what the data can say. (a) Using the sliders, rerun the section with 4 sources and 4 receivers (16 rays) and then with 40 of each (1,600 rays); compare the minimum-norm models and the posterior standard-deviation maps. (b) Back at 12 and 12, halve and double the prior's scale parameter (the argument of `point_value_scaled_heat_kernel_gaussian_measure`, keeping the model space as it is), and see how the posterior mean and its uncertainty respond. (c) With 12 sources and receivers, raise the noise slider in steps up to 1 and watch the minimum-norm model, the posterior mean and the posterior standard deviation. In each case, where does the prior matter most?
 """),
 scratch(),
 solution(r"""
-For (a) the sliders do the work. With 16 rays the minimum-norm model is little more than a few smooth streaks along the rays, the posterior mean is much the same, and the uncertainty is close to the prior almost everywhere. With 1,600 rays the mean reproduces the truth in detail, and the uncertainty is small except in the margins, where rays are sparse.
+For (a) and (c) the sliders do the work. With 16 rays the minimum-norm model is little more than a few smooth streaks along the rays, the posterior mean is much the same, and the uncertainty is close to the prior almost everywhere. With 1,600 rays the mean reproduces the truth in detail, and the uncertainty is small except in the margins, where rays are sparse.
 
 For (b), the following reruns the inversion with the same rays and data-error level but a new prior each time:
 
@@ -510,7 +525,7 @@ for row, ps in zip(ax, [0.05, 0.2]):
 plt.show()
 ```
 
-A small prior scale allows fine structure the rays cannot resolve, so the posterior stays uncertain between rays; a large one lets each ray constrain a broad neighbourhood, narrowing the posterior everywhere but at the risk of smoothing away real features. In every case the prior matters most where the ray coverage is poorest, which is exactly where the data leave the problem underdetermined.
+A small prior scale allows fine structure the rays cannot resolve, so the posterior stays uncertain between rays; a large one lets each ray constrain a broad neighbourhood, narrowing the posterior everywhere but at the risk of smoothing away real features. For (c), as the noise grows the minimum-norm model fades towards zero, because ever smoother functions can fit the data to within their (large) errors, and the posterior mean shrinks towards the prior mean while the standard-deviation map rises towards the prior's value of 1 everywhere. Noisy data constrain the model less, so the prior takes over. In every case the prior matters most where the data are weakest, whether through poor ray coverage or large errors, which is exactly where the data leave the problem underdetermined.
 """),
 ]
 
